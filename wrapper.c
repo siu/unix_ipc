@@ -71,8 +71,7 @@ int write_str(int fd, const char *fmt, ...)
         return -1;
     }
         
-    safe_write(fd, out_buffer, n);
-    return 0;
+    return safe_write(fd, out_buffer, n);
 }
 
 static char in_buffer[1024];
@@ -85,14 +84,21 @@ ssize_t read_line(int fd, char *line, size_t linelen)
 
     while (1)
     {
-        for (; in_buf_read<in_buf_len; in_buf_read++) {
-            if (in_buffer[in_buf_read] == '\n')
-            {
-                break;
-            }
+        for (; in_buf_read<=in_buf_len; in_buf_read++)
+        {
+            if (in_buffer[in_buf_read] == '\n') // Find the line end
+                break; 
         }
-        if (in_buf_read < in_buf_len || in_buf_len == 1024) {
+
+        if (in_buf_read <= in_buf_len)
+        {
             break;
+        }
+
+        if (in_buf_len >= 1024) 
+        {
+            fprintf(stderr, "No end line character found in the buffer\n");
+            return -1;
         }
 
         len = xread(fd, in_bufp, 1024 - in_buf_len);
@@ -107,16 +113,18 @@ ssize_t read_line(int fd, char *line, size_t linelen)
     }
 
     in_buf_read++;
-    if (in_buf_read <= linelen)
+    if (in_buf_read > linelen)
     {
-        strncpy(line, in_buffer, in_buf_read-1);
-        memmove(in_buffer, in_buffer+in_buf_read, 1024 - in_buf_read);
-        in_buf_len -= in_buf_read;
-        return in_buf_read -1;
+        fprintf(stderr, "Error reading line, line too long\n");
+        return -1;
     }
 
-    fprintf(stderr, "Error reading line, line too long\n");
-    return -1;
+    strncpy(line, in_buffer, in_buf_read);
+    line[in_buf_read-1] = '\0';
+    in_buf_len -= in_buf_read;
+    memmove(in_buffer, in_buffer+in_buf_read, in_buf_len);
+    return in_buf_read;
+
 }
 
 /*

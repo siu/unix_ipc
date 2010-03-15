@@ -74,8 +74,18 @@ int server_init()
 /* This server simply echoes everything */
 void server_run()
 {
-    char line[1024];
+    char line[256];
     int len;
+
+    int pcount = 0;
+    int total_pcount = 0;
+    int turn = 1;
+
+    /*
+     *  We'll ignore SIGTERM from now on, we have a
+     *  good client.
+     */
+    signal(SIGTERM, SIG_IGN);
 
     while (1)
     {
@@ -94,6 +104,9 @@ void server_run()
         if(line[0] == 'D') {
             printf(".");
             write_str(client_fd, "%s\n", line);
+
+            pcount++;
+            total_pcount++;
             continue;
         }
         if(line[0] == 'T') {
@@ -101,6 +114,9 @@ void server_run()
             // End of turn
             printf("<T\n");
             write_str(client_fd, "T\n");
+
+            printf("Stats: turn %d, particles %d\n", turn, pcount);
+            pcount = 0; turn++;
             continue;
         }
         if(line[0] == 'E') {
@@ -108,8 +124,11 @@ void server_run()
             // Send E and expect a client disconnect
             printf("<E\n");
             write_str(client_fd, "E\n");
+
+            printf("Stats: turn %d, total particles %d\n", turn, total_pcount);
             break;
         }
+        fprintf(stderr, "Unrecognized line format, line: \"%s\"\n", line);
     }
 }
 
@@ -137,12 +156,6 @@ int main(int argc, char *argv[])
     if (server_init() != -1) 
     {
         printf("Listening for data...\n");
-        /*
-         *  We'll ignore SIGTERM from now on, we have a
-         *  good client.
-         */
-        signal(SIGTERM, SIG_IGN);
-
         server_run();
     }
     printf("Closing server...\n");

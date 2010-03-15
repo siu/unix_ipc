@@ -31,7 +31,7 @@ static int client_fd = -1;
  */
 static char *generate_particle(int turn, int id) 
 {
-    char buf[1024];
+    char buf[256];
     char *part;
 
     snprintf(buf, 1024, "D %d %d %7e %7e %7e %7e %7e %d %d %7e %7e", 
