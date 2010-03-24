@@ -1,6 +1,6 @@
 
 LIBS =
-CFLAGS += -g -Wall
+CFLAGS += -O2 -g -Wall
 
 all: client_pipe client_net server_pipe server_net
 

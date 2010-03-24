@@ -1,5 +1,8 @@
 #include "wrapper.h"
 
+#define IN_BUFFER_SIZE 1024
+#define IN_BUFFER_SIZE 1024
+
 int write_str(int fd, const char *fmt, ...) __attribute__((format (printf, 2, 3)));
 
 /*
@@ -18,21 +21,6 @@ ssize_t xwrite(int fd, const void *buf, size_t len)
     }
 }
 
-/*
- * Write a packetized stream, where each line is preceded by
- * its length (including the header) as a 4-byte hex number.
- * A length of 'zero' means end of stream (and a length of 1-3
- * would be an error).
- *
- * This is all pretty stupid, but we use this packetized line
- * format to make a streaming format possible without ever
- * over-running the read buffers. That way we'll never read
- * into what might be the pack data (which should go to another
- * process entirely).
- *
- * The writing side could use stdio, but since the reading
- * side can't, we stay with pure read/write interfaces.
- */
 ssize_t safe_write(int fd, const void *buf, ssize_t n)
 {
     ssize_t nn = n;
@@ -54,8 +42,7 @@ ssize_t safe_write(int fd, const void *buf, ssize_t n)
     return nn;
 }
 
-
-static char out_buffer[1024];
+static char out_buffer[IN_BUFFER_SIZE];
 int write_str(int fd, const char *fmt, ...) 
 {
     va_list args;
@@ -74,56 +61,59 @@ int write_str(int fd, const char *fmt, ...)
     return safe_write(fd, out_buffer, n);
 }
 
-static char in_buffer[1024];
-static int  in_buf_len = 0;
+static char in_buffer[IN_BUFFER_SIZE];
+static int  in_buf_len = 0; // Size of data stored in buffer
+
 ssize_t read_line(int fd, char *line, size_t linelen)
 {
     char *in_bufp = in_buffer+in_buf_len;
-    int in_buf_read = 0;
+    int line_size = 0;
     int len;
 
     while (1)
     {
-        for (; in_buf_read<=in_buf_len; in_buf_read++)
-        {
-            if (in_buffer[in_buf_read] == '\n') // Find the line end
-                break; 
-        }
+        // Move line_size until a newline is found or end of buffer
+        for (; line_size<in_buf_len && in_buffer[line_size] != '\n'; line_size++);
+        line_size++; // Honour its name and reflect size, not position
 
-        if (in_buf_read <= in_buf_len)
-        {
+        if (line_size <= in_buf_len)
             break;
-        }
 
-        if (in_buf_len >= 1024) 
+        if (in_buf_len >= IN_BUFFER_SIZE) 
         {
-            fprintf(stderr, "No end line character found in the buffer\n");
+            fprintf(stderr, "No end line character found in the buffer (buffer is full)\n");
             return -1;
         }
 
-        len = xread(fd, in_bufp, 1024 - in_buf_len);
-        if (len <= 0) 
+        alarm(100u);
+        len = read(fd, in_bufp, IN_BUFFER_SIZE - in_buf_len);
+        alarm(0u);
+
+        if (len == 0) 
+            return 0;
+        if (len < 0) 
         {
+            if(errno == EAGAIN || errno == EINTR)
+                return 0;
             return -1;
         }
 
         in_buf_len += len;
         in_bufp += len;
-
     }
 
-    in_buf_read++;
-    if (in_buf_read > linelen)
+    if (line_size > linelen)
     {
         fprintf(stderr, "Error reading line, line too long\n");
         return -1;
     }
 
-    strncpy(line, in_buffer, in_buf_read);
-    line[in_buf_read-1] = '\0';
-    in_buf_len -= in_buf_read;
-    memmove(in_buffer, in_buffer+in_buf_read, in_buf_len);
-    return in_buf_read;
+    strncpy(line, in_buffer, line_size);
+    assert( line[line_size-1] == '\n' );
+    line[line_size-1] = 0;
+    in_buf_len -= line_size;
+    memmove(in_buffer, in_buffer+line_size, in_buf_len);
+    return line_size;
 
 }
 

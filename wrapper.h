@@ -7,6 +7,8 @@
 #include <unistd.h>
 #include <errno.h>
 #include <stdarg.h>
+#include <assert.h>
+#include <sys/time.h>
 
 ssize_t read_line(int fd, char *line, size_t linelen);
 int write_str(int fd, const char *fmt, ...) __attribute__((format (printf, 2, 3)));

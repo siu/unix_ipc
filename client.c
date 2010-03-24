@@ -1,12 +1,22 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
-#include <sys/stat.h>
+#include <stdbool.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <unistd.h>
+#include <time.h>
+#include <netdb.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/socket.h>
 #include "wrapper.h"
+
+#define TURNS 300
+#define NPARTS 200
+#define TURN_DELAY_SECS 1
+#define TURN_DELAY_NSECS 0
+
 
 #ifndef NET
 // Pipes
@@ -51,7 +61,7 @@ static char *generate_particle(int turn, int id)
     return part;
     
 }
-void wait_server_particles()
+bool process_incomming_particles()
 {
     char buf[1024];
     int len;
@@ -60,7 +70,9 @@ void wait_server_particles()
     {
         len = read_line(client_fd, buf, sizeof(buf));
         
-        if (len <= 0) 
+        if (len == 0)
+            return false;
+        if (len < 0) 
         {
             fprintf(stderr, "Connection closed by server\n");
             break;
@@ -80,9 +92,10 @@ void wait_server_particles()
 
             printf("<T\n");
             // End of turn
-            break;
+            return true;
         }
     }
+    return false;
 }
 void wait_server_end()
 {
@@ -93,7 +106,9 @@ void wait_server_end()
     {
         len = read_line(client_fd, buf, sizeof(buf));
         
-        if (len <= 0) 
+        if (len == 0)
+            continue;
+        if (len < 0) 
         {
             fprintf(stderr, "Connection closed by server\n");
             break;
@@ -114,9 +129,9 @@ void wait_server_end()
 
 #ifndef NET
 /**
- * Connects to server through a pipe
+ * server_connects to server through a pipe
  */
-int connect(char *server_filename, char *client_filename)
+int server_connect(char *server_filename, char *client_filename)
 {
     server_fd = open(server_filename, O_WRONLY);
     if (server_fd < 0) {
@@ -125,7 +140,7 @@ int connect(char *server_filename, char *client_filename)
         return -1;
     }
 
-    client_fd = open(client_filename, O_RDONLY);
+    client_fd = open(client_filename, O_RDONLY | O_NONBLOCK);
     if (client_fd < 0) {
         fprintf(stderr, "An error ocurred when opening file \"%s\":\n\t%s\n", 
                 client_filename, strerror(errno));
@@ -134,23 +149,60 @@ int connect(char *server_filename, char *client_filename)
 
     return 0;
 }
-#else
-/**
- * Connects to server through tcp/ip connection
- */
-int connect(char *hostname, int port)
-{
-    // TODO
-    return 0;
-}
-#endif // Net
 
-void disconnect()
+void server_disconnect()
 {
     if (server_fd != -1) close(server_fd);
     if (client_fd != -1) close(client_fd);
     server_fd = client_fd = -1;
 }
+#else
+
+/**
+ * Connects to server through tcp/ip
+ */
+int server_connect(char *host, int portnum)
+{
+    int sockfd = -1;
+    struct sockaddr_in sin;
+
+    sockfd = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (sockfd < 0)
+    {
+        fprintf(stderr, "Unable to create socket (%s)\n", strerror(errno));
+        return -1;
+    }
+
+    memset(&sin, 0, sizeof(sin));
+    sin.sin_family = PF_INET;
+    sin.sin_port = htons(portnum);
+
+    if (connect(sockfd, (struct sockaddr *)&sin, sizeof(sin)) < 0)
+    {
+        fprintf(stderr, "%s %d: errno=%s\n", host, portnum, strerror(errno));
+        close(sockfd);
+        sockfd = -1;
+        return -1;
+    }
+
+    if (sockfd < 0)
+    {
+        fprintf(stderr, "unable to connect a socket (%s)\n", strerror(errno));
+    }
+    fcntl(sockfd, F_SETFL, O_NONBLOCK);
+
+    server_fd = client_fd = sockfd;
+
+    return sockfd;
+}
+
+void server_disconnect()
+{
+    if (server_fd != -1) close(server_fd);
+    server_fd = client_fd = -1;
+}
+#endif // Net
+
 
 int main(int argc, char *argv[])
 {
@@ -158,20 +210,27 @@ int main(int argc, char *argv[])
     char *part;
     int turn, pid;
     int t, p;
+    bool turn_done;
+    struct timespec wait_time;
+    wait_time.tv_sec = TURN_DELAY_SECS;
+    wait_time.tv_nsec = TURN_DELAY_NSECS;
 
     printf("Connecting to server...\n");
 #ifndef NET
-    ret = connect(SERVER_FILENAME, CLIENT_FILENAME);
+    ret = server_connect(SERVER_FILENAME, CLIENT_FILENAME);
 #else
-    ret = connect(SERVER_HOST, SERVER_PORT);
+    ret = server_connect(SERVER_HOST, SERVER_PORT);
 #endif
 
     if (ret != -1)
         printf("Sending data...\n");
-        for (t=0; t<500; t++)
+        for (t=0; t<TURNS; t++)
         {
+            turn_done = false;
             turn = t+1;
-            for (p=0; p<200; p++) 
+            printf("Beginning turn %d\n", turn);
+            nanosleep(&wait_time, NULL);
+            for (p=0; p<NPARTS && !turn_done; p++) 
             {
                 pid = p+1;
                 part = generate_particle(turn, pid);
@@ -190,18 +249,22 @@ int main(int argc, char *argv[])
 
                 free(part);
 
+                // Process incoming data if any
+                turn_done = process_incomming_particles();
             }
             // Send end of turn
             printf("T\n");
             write_str(server_fd, "T %d\n", turn);
-            wait_server_particles();
+
+            // Process incoming data if any
+            while(!turn_done && !(turn_done = process_incomming_particles()));
         }
     printf("E\n");
     write_str(server_fd, "E\n");
     wait_server_end();
 
     printf("Disconnecting...\n");
-    disconnect();
+    server_disconnect();
 
     return 0;
 }
