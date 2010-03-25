@@ -1,7 +1,7 @@
 #include "wrapper.h"
 
 #define IN_BUFFER_SIZE 1024
-#define IN_BUFFER_SIZE 1024
+#define OUT_BUFFER_SIZE 1024
 
 int write_str(int fd, const char *fmt, ...) __attribute__((format (printf, 2, 3)));
 
@@ -42,7 +42,7 @@ ssize_t safe_write(int fd, const void *buf, ssize_t n)
     return nn;
 }
 
-static char out_buffer[IN_BUFFER_SIZE];
+static char out_buffer[OUT_BUFFER_SIZE];
 int write_str(int fd, const char *fmt, ...) 
 {
     va_list args;
@@ -73,10 +73,9 @@ ssize_t read_line(int fd, char *line, size_t linelen)
     while (1)
     {
         // Move line_size until a newline is found or end of buffer
-        for (; line_size<in_buf_len && in_buffer[line_size] != '\n'; line_size++);
-        line_size++; // Honour its name and reflect size, not position
+        for (; line_size<in_buf_len && in_buffer[line_size] != '\n'; ++line_size);
 
-        if (line_size <= in_buf_len)
+        if (line_size < in_buf_len)
             break;
 
         if (in_buf_len >= IN_BUFFER_SIZE) 
@@ -102,6 +101,7 @@ ssize_t read_line(int fd, char *line, size_t linelen)
         in_buf_len += len;
         in_bufp += len;
     }
+    line_size++; // Honour its name and reflect size, not position
 
     if (line_size > linelen)
     {
