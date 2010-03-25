@@ -210,20 +210,15 @@ int server_connect(char *host, int portnum)
     }
 
     memset(&sin, 0, sizeof(sin));
-    sin.sin_family = PF_INET;
+    sin.sin_family = AF_INET;
     sin.sin_port = htons(portnum);
 
     if (connect(sockfd, (struct sockaddr *)&sin, sizeof(sin)) < 0)
     {
-        fprintf(stderr, "%s %d: errno=%s\n", host, portnum, strerror(errno));
+        fprintf(stderr, "Unable to connect to %s %d error=(%s)\n", host, portnum, strerror(errno));
         close(sockfd);
         sockfd = -1;
         return -1;
-    }
-
-    if (sockfd < 0)
-    {
-        fprintf(stderr, "unable to connect a socket (%s)\n", strerror(errno));
     }
     fcntl(sockfd, F_SETFL, O_NONBLOCK);
 

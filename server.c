@@ -107,7 +107,7 @@ int server_init()
     }
     
     memset(&ai, 0, sizeof(ai));
-    ai.sin_family = PF_INET;
+    ai.sin_family = AF_INET;
     ai.sin_addr.s_addr = htonl(INADDR_ANY);
     ai.sin_port = htons(SERVER_PORT);
 
