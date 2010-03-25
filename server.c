@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <unistd.h>
@@ -14,7 +15,10 @@
 #include "wrapper.h"
 
 #define ITER_DELAY_SECS 0
-#define ITER_DELAY_NSECS 300000
+//#define ITER_DELAY_NSECS 300000
+#define ITER_DELAY_NSECS 0
+
+bool verbose = false;
 
 #ifndef NET
 // Pipes
@@ -150,8 +154,6 @@ int server_init()
         return -1;
     }
 
-    //fcntl(incoming, F_SETFL, O_NONBLOCK);
-
     server_fd = client_fd = incoming;
     return 0;
 
@@ -161,8 +163,8 @@ int server_end()
     if (client_fd != -1) 
         close(client_fd);
     if (server_socket != -1) {
-        shutdown(server_socket, 0);
         close(server_socket);
+        shutdown(server_socket, 0);
     }
 
     server_socket = server_fd = client_fd = -1;
@@ -171,15 +173,34 @@ int server_end()
 }
 #endif
 
+#ifdef FILEDUMP
+FILE * indump = NULL;
+FILE * outdump = NULL;
+void open_dump_files()
+{
+    indump = fopen("server_in.log", "w+");
+    outdump = fopen("server_out.log", "w+");
+}
+void close_dump_files()
+{
+    if (indump)
+        fclose(indump);
+    if (outdump)
+        fclose(outdump);
+    indump = outdump = NULL;
+}
+
+#endif
+
 /* This server simply echoes everything */
 void server_run()
 {
     char line[256];
     int len;
 
-    int pcount = 0;
-    int total_pcount = 0;
-    int turn = 1;
+    unsigned int pcount = 0;
+    unsigned int total_pcount = 0;
+    unsigned int turn = 1;
 
     struct timespec wait_time;
     wait_time.tv_sec = ITER_DELAY_SECS;
@@ -206,77 +227,90 @@ void server_run()
 #ifdef DEBUG
         printf("read: \"%s\"\n", line);
 #endif
+#ifdef FILEDUMP
+        fprintf(indump, "%s\n", line);
+#endif
 
         if (line[0] == 'D') 
         {
-            printf(".");
+            if (verbose) printf("<");
+
             nanosleep(&wait_time, NULL);
             write_str(client_fd, "%s\n", line);
+#ifdef FILEDUMP
+            fprintf(outdump, "%s\n", line);
+#endif
+
+            if (verbose) printf(".");
 
             pcount++;
-            total_pcount++;
             continue;
         }
         if (line[0] == 'T') 
         {
 
             // End of turn
-            printf("<T\n");
+            if (verbose) printf("<T\n");
             write_str(client_fd, "T\n");
+#ifdef FILEDUMP
+            fprintf(outdump, "T\n");
+#endif
 
-            printf("Stats: turn %d, particles %d\n", turn, pcount);
-            pcount = 0; turn++;
+            printf("Stats: turn %u, particles %u\n", turn, pcount);
+            total_pcount += pcount;
+            pcount = 0; 
+            turn++;
             continue;
         }
         if (line[0] == 'E') 
         {
             // End of computation
             // Send E and expect a client disconnect
-            printf("<E\n");
+            if (verbose) printf("<E\n");
             write_str(client_fd, "E\n");
+#ifdef FILEDUMP
+            fprintf(outdump, "E\n");
+#endif
 
-            printf("Stats: completed turns %d, total particles %d\n", turn-1, total_pcount);
+            printf("Stats: completed turns %u, total particles %u\n", turn-1, total_pcount);
             break;
         }
         fprintf(stderr, "Unrecognized line format, line: \"%s\"\n", line);
     }
 }
 
-void sigalrm_handler (int sig)
+void fatal_signal (int sig)
 {
-    fprintf(stderr, "Timeout\n");
+    if (sig == SIGALRM)
+        fprintf(stderr, "Timeout\n");
+    printf("Closing server...\n");
     server_end();
+#ifdef FILEDUMP
+    close_dump_files();
+#endif
     exit(1);
-}
-
-void setup_signals()
-{
-    struct sigaction act;
-
-    memset(&act, 0, sizeof(act));
-    sigemptyset(&act.sa_mask);
-    act.sa_flags = 0;
-    act.sa_handler = sigalrm_handler;
-
-    if (sigaction(SIGALRM, &act, NULL) < 0) 
-    {
-        fprintf(stderr, "Error installing SIGALRM handler\n");
-        exit(1);
-    }
 }
 
 int main(int argc, char *argv[])
 {
-    setup_signals();
+    signal(SIGALRM, fatal_signal);
+    signal(SIGINT, fatal_signal);
+    signal(SIGTERM, fatal_signal);
 
     printf("Initializing server and waiting connection...\n");
     if (server_init() != -1) 
     {
+#ifdef FILEDUMP
+        open_dump_files();
+#endif
         printf("Listening for data...\n");
         server_run();
     }
     printf("Closing server...\n");
     server_end();
+#ifdef FILEDUMP
+    close_dump_files();
+#endif
 
     return 0;
 }

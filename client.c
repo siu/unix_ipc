@@ -10,13 +10,16 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
+#include <signal.h>
 #include "wrapper.h"
 
-#define TURNS 300
-#define NPARTS 200
-#define TURN_DELAY_SECS 1
+#define TURNS 500
+#define NPARTS 2000
+//#define TURN_DELAY_SECS 1
+#define TURN_DELAY_SECS 0
 #define TURN_DELAY_NSECS 0
 
+bool verbose = false;
 
 #ifndef NET
 // Pipes
@@ -32,6 +35,25 @@
 
 static int server_fd = -1;
 static int client_fd = -1;
+
+#ifdef FILEDUMP
+FILE * indump = NULL;
+FILE * outdump = NULL;
+void open_dump_files()
+{
+    indump = fopen("client_in.log", "w+");
+    outdump = fopen("client_out.log", "w+");
+}
+void close_dump_files()
+{
+    if (indump)
+        fclose(indump);
+    if (outdump)
+        fclose(outdump);
+    indump = outdump = NULL;
+}
+
+#endif
 
 /**
  * Generate a particle string
@@ -61,6 +83,12 @@ static char *generate_particle(int turn, int id)
     return part;
     
 }
+
+static unsigned int in_particles = 0;
+/**
+ * Process incoming particles if any
+ * returns true if end of turn is received
+ */
 bool process_incomming_particles()
 {
     char buf[1024];
@@ -71,7 +99,7 @@ bool process_incomming_particles()
         len = read_line(client_fd, buf, sizeof(buf));
         
         if (len == 0)
-            return false;
+            break;
         if (len < 0) 
         {
             fprintf(stderr, "Connection closed by server\n");
@@ -81,17 +109,22 @@ bool process_incomming_particles()
 #ifdef DEBUG
         printf("read: \"%s\"\n", buf);
 #endif
+#ifdef FILEDUMP
+        fprintf(indump, "%s\n", buf);
+#endif
 
         if (buf[0] == 'D')
         {
-            printf("<");
+            if (verbose) printf("<");
+
+            in_particles++;
             continue;
         }
         if (buf[0] == 'T') 
         {
 
-            printf("<T\n");
             // End of turn
+            if (verbose) printf("<T\n");
             return true;
         }
     }
@@ -117,11 +150,14 @@ void wait_server_end()
 #ifdef DEBUG
         printf("read: \"%s\"\n", buf);
 #endif
+#ifdef FILEDUMP
+        fprintf(indump, "%s\n", buf);
+#endif
 
         if (buf[0] == 'E') 
         {
             // End of computation
-            printf("<E\n");
+            if (verbose) printf("<E\n");
             break;
         }
     }
@@ -203,7 +239,6 @@ void server_disconnect()
 }
 #endif // Net
 
-
 int main(int argc, char *argv[])
 {
     int ret;
@@ -221,6 +256,9 @@ int main(int argc, char *argv[])
 #else
     ret = server_connect(SERVER_HOST, SERVER_PORT);
 #endif
+#ifdef FILEDUMP
+    open_dump_files();
+#endif
 
     if (ret != -1)
         printf("Sending data...\n");
@@ -228,7 +266,9 @@ int main(int argc, char *argv[])
         {
             turn_done = false;
             turn = t+1;
-            printf("Beginning turn %d\n", turn);
+            in_particles = 0;
+            printf("== Turn %d ==\n", turn);
+            printf(" * Sending %d particles...\n", NPARTS);
             nanosleep(&wait_time, NULL);
             for (p=0; p<NPARTS && !turn_done; p++) 
             {
@@ -245,7 +285,10 @@ int main(int argc, char *argv[])
 #endif
                 // Send particle
                 write_str(server_fd, "%s\n", part);
-                printf(".");
+#ifdef FILEDUMP
+                fprintf(outdump, "%s\n", part);
+#endif
+                if (verbose) printf(".");
 
                 free(part);
 
@@ -253,18 +296,29 @@ int main(int argc, char *argv[])
                 turn_done = process_incomming_particles();
             }
             // Send end of turn
-            printf("T\n");
+            if (verbose) printf("T\n");
             write_str(server_fd, "T %d\n", turn);
+#ifdef FILEDUMP
+            fprintf(outdump, "T %d\n", turn);
+#endif
 
             // Process incoming data if any
             while(!turn_done && !(turn_done = process_incomming_particles()));
+            assert(in_particles == NPARTS);
+            printf(" * Received %d particles\n", in_particles);
         }
-    printf("E\n");
+    if (verbose) printf("E\n");
     write_str(server_fd, "E\n");
+#ifdef FILEDUMP
+    fprintf(outdump, "E\n");
+#endif
     wait_server_end();
 
     printf("Disconnecting...\n");
     server_disconnect();
+#ifdef FILEDUMP
+    close_dump_files();
+#endif
 
     return 0;
 }

@@ -85,12 +85,13 @@ ssize_t read_line(int fd, char *line, size_t linelen)
             return -1;
         }
 
-        alarm(100u);
+        alarm(15u);
         len = read(fd, in_bufp, IN_BUFFER_SIZE - in_buf_len);
         alarm(0u);
 
-        if (len == 0) 
+        if (len == 0)
             return 0;
+
         if (len < 0) 
         {
             if(errno == EAGAIN || errno == EINTR)
