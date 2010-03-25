@@ -13,7 +13,7 @@
 #include <signal.h>
 #include "wrapper.h"
 
-#define TURNS 500
+#define TURNS 5000
 #define NPARTS 2000
 //#define TURN_DELAY_SECS 1
 #define TURN_DELAY_SECS 0
@@ -89,7 +89,7 @@ static unsigned int in_particles = 0;
  * Process incoming particles if any
  * returns true if end of turn is received
  */
-bool process_incomming_particles()
+int process_incomming_particles()
 {
     char buf[1024];
     int len;
@@ -99,11 +99,11 @@ bool process_incomming_particles()
         len = read_line(client_fd, buf, sizeof(buf));
         
         if (len == 0)
-            break;
+            return 0;
         if (len < 0) 
         {
             fprintf(stderr, "Connection closed by server\n");
-            break;
+            return -1;;
         }
 
 #ifdef DEBUG
@@ -125,10 +125,10 @@ bool process_incomming_particles()
 
             // End of turn
             if (verbose) printf("<T\n");
-            return true;
+            return 1;
         }
     }
-    return false;
+    return 0;
 }
 void wait_server_end()
 {
@@ -240,7 +240,7 @@ int main(int argc, char *argv[])
     char *part;
     int turn, pid;
     int t, p;
-    bool turn_done;
+    int turn_done;
     struct timespec wait_time;
     wait_time.tv_sec = TURN_DELAY_SECS;
     wait_time.tv_nsec = TURN_DELAY_NSECS;
@@ -259,7 +259,7 @@ int main(int argc, char *argv[])
         printf("Sending data...\n");
         for (t=0; t<TURNS; t++)
         {
-            turn_done = false;
+            turn_done = 0;
             turn = t+1;
             in_particles = 0;
             printf("== Turn %d ==\n", turn);
